@@ -32,7 +32,6 @@ This guide provides best practices for base CloudFormation templates.
 - **ALWAYS** enable S3 bucket encryption with `BucketEncryption`
 - **ALWAYS** block public access with `PublicAccessBlockConfiguration`
 - **ALWAYS** enforce HTTPS-only access with bucket policies
-- **ALWAYS** enable versioning: `VersioningConfiguration.Status: Enabled`
 - **ALWAYS** configure access logging to dedicated logging bucket
 - Use Origin Access Control (OAC) for CloudFront distributions, not legacy OAI
 
