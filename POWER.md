@@ -34,17 +34,54 @@ This power includes the following steering files:
 
 ### Create a new SAM Application
 
-1. **Initialize**: Use `sam_init` to create the base project structure
+1. **Initialize**:
+
+- Ask the user what backend language should be used
+- Use `sam_init` to create the base project structure. Example args below:
+
+```
+{
+  "application_template": "hello-world",
+  "architecture": "x86_64",
+  "dependency_manager": "pip",
+  "package_type": "Zip",
+  "project_directory": "/Users/abc/git/myApp", # the current working directory
+  "project_name": "my-serverless-app",
+  "runtime": "python3.13"
+}
+```
+
 2. **Restructure**: Immediately reorganize files to follow the recommended structure:
-   - Move `template.yaml` to repository root
-   - Create `infrastructure/lambda/` directory
-   - Move function code from generated folders to `infrastructure/lambda/[function-name]/`
-   - Update `CodeUri` paths in template.yaml to point to new locations
+
+**If sam_init created a subdirectory (project_name != current directory):**
+
+- Move all files from the generated subdirectory to the repository root:
+  ```
+  mv {project_name}/* .
+  mv {project_name}/.gitignore . 2>/dev/null || true
+  rmdir {project_name}
+  ```
+
+**Always perform these restructuring steps:**
+
+- Create the proper infrastructure directory:
+  ```
+  mkdir -p infrastructure/lambda
+  ```
+- Move the generated function folder to the infrastructure directory:
+  ```
+  mv {generated_function_folder} infrastructure/lambda/{function_name}
+  ```
+- Update `CodeUri` paths in template.yaml to point to new locations:
+  - Change from: `CodeUri: {generated_function_folder}/`
+  - Change to: `CodeUri: infrastructure/lambda/{function_name}/`
+- Rebuild the application to verify structure with the `sam_build` tool
 
 **DO NOT**:
 
 - Add additional resources to achieve a comprehensive solution, unless explicitly asked to.
 - Make assumptions about what the user wants beyond basic SAM initialization
+- Add `.aws-sam` to `.gitignore`
 
 #### Adding an API
 
@@ -57,7 +94,37 @@ When adding APIs to SAM applications:
 ### Set up a static website with API backend
 
 - Add an S3 bucket for hosting the static site
-- Add an API Gateway API (HTTP or REST)
+
+```
+  WebUIBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+```
+
+- Add an API Gateway API (HTTP or REST), example:
+
+```
+  ApiGatewayApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      AccessLogSetting:
+        DestinationArn: !GetAtt ApiGWLogGroup.Arn
+        Format: "$context.identity.sourceIp $context.requestTime $context.httpMethod $context.resourcePath $context.protocol $context.status $context.responseLength $context.requestId"
+      StageName: !Ref Stage
+      EndpointConfiguration: REGIONAL
+      Auth:
+        ApiKeyRequired: "true"
+```
+
 - Add an `AWS::CloudFront::OriginAccessControl` resource
 - Add a CloudFront Distribution with origins for the static site and API:
 
@@ -120,6 +187,36 @@ When adding APIs to SAM applications:
             ResponseHeadersPolicyId: !Ref ResponseHeadersPolicy
         HttpVersion: http2
         IPV6Enabled: true
+```
+
+- Add an S3 bucket policy for CloudFront usage:
+
+```
+  WebUIBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebUIBucket
+      PolicyDocument:
+        Statement:
+          - Sid: HttpsOnly
+            Action: "*"
+            Effect: Deny
+            Resource:
+              - !Sub arn:${AWS::Partition}:s3:::${WebUIBucket}
+              - !Sub arn:${AWS::Partition}:s3:::${WebUIBucket}/*
+            Principal: "*"
+            Condition:
+              Bool:
+                "aws:SecureTransport": "false"
+          - Sid: CloudFrontOriginOnly
+            Action: s3:GetObject
+            Effect: Allow
+            Resource: !Sub arn:${AWS::Partition}:s3:::${WebUIBucket}/*
+            Principal:
+              Service: "cloudfront.amazonaws.com"
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}
 ```
 
 - Add a AWS::Serverless::Function as an API Handler
@@ -215,6 +312,8 @@ from aws_lambda_powertools.event_handler import APIGatewayRestResolver, CORSConf
 cors_config = CORSConfig(max_age=300)
 app = APIGatewayRestResolver(cors=cors_config)
 ```
+
+**NEVER** add additional CORS configuration unless explicitly asked to
 
 ### Use amplify and Cognito for web app authentication
 
